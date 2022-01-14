@@ -32,6 +32,124 @@ def authorize():
 
 #authorize()
 
+
+
+
+## POPULATE THE DATABASE WITH QUERIES ON SPOTIFY API
+
+def populate_database():
+    con = psycopg2.connect(database="MelodyDB", user="postgres",password="melody",host="127.0.0.1",port="5432")
+    cur = con.cursor()
+    popularity = 0
+    genres = []
+    album_id = 0
+    access_token = "[redacted]"
+    song_id = 0
+    features = []
+
+    ## POPULATE ARTIST TABLE
+    for i in range(len(artist_list)):
+        search_url_one = "https://api.spotify.com/v1/artists/"
+        search_url_two = "https://api.spotify.com/v1/search?query="
+        search_url_two_two = "&type=artist&offset=0&limit=1"
+        response_query = requests.get(search_url_two + artist_list_two[i] + search_url_two_two + "&" + access_token)
+        query_ret = response_query.json()
+
+        artist_id = query_ret.get("artists").get("items")[0].get("id")
+        response = requests.get(search_url_one + artist_id + "?" + access_token)
+        if response.status_code > 299:
+            print("ERROR GETTING ARTISTS ", response.status_code)
+            exit(1)
+        genres.clear()
+        artist_ret = response.json()
+        popularity = artist_ret.get("popularity")
+        genres = artist_ret.get("genres")
+
+        if len(genres) > 0:
+            for g in range(len(genres)):
+                genres[g] = genres[g].replace("\'", "\'\'")
+            final_str = "INSERT INTO artist (artist_id, name, popularity, genres) VALUES({}, \'{}\', {}, ARRAY{});".format(i+1, artist_list[i], popularity, genres)
+            final_str = final_str.replace("\"","\'")
+        else:
+            final_str = "INSERT INTO artist (artist_id, name, popularity, genres) VALUES({}, \'{}\', {}, null);".format(i+1, artist_list[i], popularity)
+        print(final_str)
+        cur.execute(final_str)
+        time.sleep(0.1)
+        con.commit()
+
+
+        ##POPULATE ALBUM TABLE
+        search_url_one = "https://api.spotify.com/v1/artists/"
+        search_url_two = "/albums?"
+        response = requests.get(search_url_one + artist_id + search_url_two + access_token)
+        if response.status_code > 299:
+            print("ERROR GETTING ALBUMS ", response.status_code)
+            exit(1)
+        album_ret = response.json()
+        prev_name = album_ret.get("items")[0].get("name")
+        prev_two =  prev_name
+        num_albums = len(album_ret.get("items"))
+        for j in range(15):
+            if j >= num_albums:
+                continue
+            album_name = album_ret.get("items")[j].get("name").replace("\'", "\'\'").replace("\"","\"\"")
+            album_release = album_ret.get("items")[j].get("release_date")
+            album_length = album_ret.get("items")[j].get("total_tracks")
+            s_album_id = album_ret.get("items")[j].get("uri")[14:]
+            if album_name != prev_name and album_name != prev_two and album_length > 1:
+                album_id += 1
+                prev_two =  prev_name
+
+                # If the album's release is not provided as a full date
+                if len(album_release) == 4:
+                    album_release = album_release + "-01-01"
+                elif len(album_release) == 7:
+                    album_release = album_release + "-01"
+
+                final_str = "INSERT INTO album (title, album_id, artist_id, release_date, album_length) VALUES(\'{}\',{}, {}, \'{}\', {});".format(album_name, album_id, i+1, album_release, album_length)
+                print(final_str)
+                time.sleep(0.1)
+                cur.execute(final_str)
+                prev_name = album_name
+                con.commit()
+
+                #POPULATE SONG TABLE
+                search_url_one = "https://api.spotify.com/v1/albums/"
+                search_url_two = "/tracks?"
+                response = requests.get(search_url_one + s_album_id + search_url_two + access_token)
+                if response.status_code > 299:
+                    print("ERROR GETTING ALBUMS ", response.status_code)
+                    exit(1)
+                track_ret = response.json()
+                track_list = track_ret.get("items")
+
+                for t in range(len(track_list)):
+                    track_num = track_list[t].get("track_number")
+                    track_name = track_list[t].get("name").replace("\'", "\'\'").replace("\"","\"\"")
+                    track_duration = track_list[t].get("duration_ms")
+                    song_id += 1
+
+                    for k in range(1, len(track_list[t].get("artists"))):
+                        try:
+                            indexed_artist = artist_list.index(track_list[t].get("artists")[k].get("name"))
+                            features.append(indexed_artist+1)
+                        except:
+                            pass
+
+                    if len(features) > 0:
+                        final_str = "INSERT INTO song (title, rewards, song_id, artist_id, album_id, artist_features, track_num, duration_ms) VALUES(\'{}\', null,{}, {}, {}, ARRAY{}, {}, {});".format(track_name, song_id, i+1, album_id, features, track_num, track_duration)
+                        print(final_str)
+                        cur.execute(final_str)
+                    else:
+                        final_str = "INSERT INTO song (title, rewards, song_id, artist_id, album_id, artist_features, track_num, duration_ms) VALUES(\'{}\', null,{}, {}, {}, null, {}, {});".format(track_name, song_id, i+1, album_id, track_num, track_duration)
+                        print(final_str)
+                        cur.execute(final_str)
+                    features.clear()
+                con.commit()
+    con.close()
+
+    
+    
 #Standard list
 artist_list = ["Drake",
                     "Ed Sheeran",
@@ -2035,121 +2153,6 @@ artist_list_two = ["Drake",
                     "Ruel",
                     "Brett+Eldredge",
                     "Mc+Livinho"]
-
-
-
-## POPULATE THE DATABASE WITH QUERIES ON SPOTIFY API
-
-def populate_database():
-    con = psycopg2.connect(database="MelodyDB", user="postgres",password="melody",host="127.0.0.1",port="5432")
-    cur = con.cursor()
-    popularity = 0
-    genres = []
-    album_id = 0
-    access_token = "[redacted]"
-    song_id = 0
-    features = []
-
-    ## POPULATE ARTIST TABLE
-    for i in range(len(artist_list)):
-        search_url_one = "https://api.spotify.com/v1/artists/"
-        search_url_two = "https://api.spotify.com/v1/search?query="
-        search_url_two_two = "&type=artist&offset=0&limit=1"
-        response_query = requests.get(search_url_two + artist_list_two[i] + search_url_two_two + "&" + access_token)
-        query_ret = response_query.json()
-
-        artist_id = query_ret.get("artists").get("items")[0].get("id")
-        response = requests.get(search_url_one + artist_id + "?" + access_token)
-        if response.status_code > 299:
-            print("ERROR GETTING ARTISTS ", response.status_code)
-            exit(1)
-        genres.clear()
-        artist_ret = response.json()
-        popularity = artist_ret.get("popularity")
-        genres = artist_ret.get("genres")
-
-        if len(genres) > 0:
-            for g in range(len(genres)):
-                genres[g] = genres[g].replace("\'", "\'\'")
-            final_str = "INSERT INTO artist (artist_id, name, popularity, genres) VALUES({}, \'{}\', {}, ARRAY{});".format(i+1, artist_list[i], popularity, genres)
-            final_str = final_str.replace("\"","\'")
-        else:
-            final_str = "INSERT INTO artist (artist_id, name, popularity, genres) VALUES({}, \'{}\', {}, null);".format(i+1, artist_list[i], popularity)
-        print(final_str)
-        cur.execute(final_str)
-        time.sleep(0.1)
-        con.commit()
-
-
-        ##POPULATE ALBUM TABLE
-        search_url_one = "https://api.spotify.com/v1/artists/"
-        search_url_two = "/albums?"
-        response = requests.get(search_url_one + artist_id + search_url_two + access_token)
-        if response.status_code > 299:
-            print("ERROR GETTING ALBUMS ", response.status_code)
-            exit(1)
-        album_ret = response.json()
-        prev_name = album_ret.get("items")[0].get("name")
-        prev_two =  prev_name
-        num_albums = len(album_ret.get("items"))
-        for j in range(15):
-            if j >= num_albums:
-                continue
-            album_name = album_ret.get("items")[j].get("name").replace("\'", "\'\'").replace("\"","\"\"")
-            album_release = album_ret.get("items")[j].get("release_date")
-            album_length = album_ret.get("items")[j].get("total_tracks")
-            s_album_id = album_ret.get("items")[j].get("uri")[14:]
-            if album_name != prev_name and album_name != prev_two and album_length > 1:
-                album_id += 1
-                prev_two =  prev_name
-
-                # If the album's release is not provided as a full date
-                if len(album_release) == 4:
-                    album_release = album_release + "-01-01"
-                elif len(album_release) == 7:
-                    album_release = album_release + "-01"
-
-                final_str = "INSERT INTO album (title, album_id, artist_id, release_date, album_length) VALUES(\'{}\',{}, {}, \'{}\', {});".format(album_name, album_id, i+1, album_release, album_length)
-                print(final_str)
-                time.sleep(0.1)
-                cur.execute(final_str)
-                prev_name = album_name
-                con.commit()
-
-                #POPULATE SONG TABLE
-                search_url_one = "https://api.spotify.com/v1/albums/"
-                search_url_two = "/tracks?"
-                response = requests.get(search_url_one + s_album_id + search_url_two + access_token)
-                if response.status_code > 299:
-                    print("ERROR GETTING ALBUMS ", response.status_code)
-                    exit(1)
-                track_ret = response.json()
-                track_list = track_ret.get("items")
-
-                for t in range(len(track_list)):
-                    track_num = track_list[t].get("track_number")
-                    track_name = track_list[t].get("name").replace("\'", "\'\'").replace("\"","\"\"")
-                    track_duration = track_list[t].get("duration_ms")
-                    song_id += 1
-
-                    for k in range(1, len(track_list[t].get("artists"))):
-                        try:
-                            indexed_artist = artist_list.index(track_list[t].get("artists")[k].get("name"))
-                            features.append(indexed_artist+1)
-                        except:
-                            pass
-
-                    if len(features) > 0:
-                        final_str = "INSERT INTO song (title, rewards, song_id, artist_id, album_id, artist_features, track_num, duration_ms) VALUES(\'{}\', null,{}, {}, {}, ARRAY{}, {}, {});".format(track_name, song_id, i+1, album_id, features, track_num, track_duration)
-                        print(final_str)
-                        cur.execute(final_str)
-                    else:
-                        final_str = "INSERT INTO song (title, rewards, song_id, artist_id, album_id, artist_features, track_num, duration_ms) VALUES(\'{}\', null,{}, {}, {}, null, {}, {});".format(track_name, song_id, i+1, album_id, track_num, track_duration)
-                        print(final_str)
-                        cur.execute(final_str)
-                    features.clear()
-                con.commit()
-    con.close()
 
 populate_database()
 
